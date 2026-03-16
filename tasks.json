@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build timezone_app",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-pthread",
+        "-Wall",
+        "-o",
+        "timezone_app",
+        "main.cpp",
+        "App.cpp",
+        "Time.cpp",
+        "TimeZone.cpp",
+        "LocationManager.cpp",
+        "FavoriteManager.cpp",
+        "utils.cpp"
+      ],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
