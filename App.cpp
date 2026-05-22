@@ -1,12 +1,11 @@
 #include "App.h"
 #include "utils.h"
+#include "TimeZoneException.h"
 #include <iostream>
 #include <iomanip>
 #include <climits>
 #include <ctime>
 using namespace std;
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 static Time getUTC()
 {
@@ -20,8 +19,6 @@ void App::printBackHint()
     cout << "  (type 'back' or '0' at any prompt to return to menu)\n\n";
 }
 
-// ── clock ─────────────────────────────────────────────────────────────────────
-
 void App::stopLiveClock()
 {
     if (clockRunning.load())
@@ -34,42 +31,42 @@ void App::stopLiveClock()
 
 void App::showClock()
 {
-    int idx = locationManager.findCity(defaultCity);
-    if (idx == -1)
+    try
     {
-        cout << "  Default city \"" << defaultCity << "\" not found.\n";
-        return;
-    }
+        int idx = locationManager.findCity(defaultCity);
+        if (idx == -1) throw CityNotFoundException(defaultCity);
 
-    stopLiveClock();
+        stopLiveClock();
+        TimeZone z = locationManager.getZone(idx + 1);
+        clockRunning.store(true);
 
-    TimeZone z = locationManager.getZone(idx + 1);
-    clockRunning.store(true);
-
-    clockThread = thread([this, z]()
-    {
-        while (clockRunning.load())
+        clockThread = thread([this, z]()
         {
-            Time utc   = getUTC();
-            Time local = convertTime(utc, 0.0f, z.getOffset(), dst, z.supportsDST());
+            while (clockRunning.load())
+            {
+                Time utc   = getUTC();
+                Time local = convertTime(utc, 0.0f, z.getOffset(), dst, z.supportsDST());
 
-            cout << "\r  " << z.getCity() << " (" << z.getName() << ")"
-                 << " | " << getDateStr() << " | "
-                 << setw(2) << setfill('0') << local.getHour()   << ":"
-                 << setw(2) << setfill('0') << local.getMinute() << ":"
-                 << setw(2) << setfill('0') << local.getSecond()
-                 << "  [press Enter to stop]  " << flush;
+                cout << "\r  " << z.getCity() << " (" << z.getName() << ")"
+                     << " | " << getDateStr() << " | "
+                     << setw(2) << setfill('0') << local.getHour()   << ":"
+                     << setw(2) << setfill('0') << local.getMinute() << ":"
+                     << setw(2) << setfill('0') << local.getSecond()
+                     << "  [press Enter to stop]  " << flush;
 
-            this_thread::sleep_for(chrono::seconds(1));
-        }
-    });
+                this_thread::sleep_for(chrono::seconds(1));
+            }
+        });
 
-    string dummy;
-    getline(cin, dummy);
-    stopLiveClock();
+        string dummy;
+        getline(cin, dummy);
+        stopLiveClock();
+    }
+    catch (const TimeZoneException &e)
+    {
+        cout << "\n  [Error] " << e.what() << "\n";
+    }
 }
-
-// ── convert menu ──────────────────────────────────────────────────────────────
 
 void App::convertMenu()
 {
@@ -82,93 +79,97 @@ void App::convertMenu()
     int op = readIntOrBack();
     if (op == INT_MIN) { cout << "  Returning to menu.\n"; return; }
 
-    if (op == 1)
+    try
     {
-        cout << "  From City: ";
-        string fromCity = readCityOrBack();
-        if (fromCity == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
-
-        cout << "  To City  : ";
-        string toCity = readCityOrBack();
-        if (toCity == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
-
-        int s = locationManager.findCity(fromCity);
-        int d = locationManager.findCity(toCity);
-        if (s == -1 || d == -1) { cout << "  City not found. Check spelling.\n"; return; }
-
-        TimeZone fromZone = locationManager.getZone(s + 1);
-        TimeZone toZone   = locationManager.getZone(d + 1);
-
-        Time utc      = getUTC();
-        Time fromTime = convertTime(utc, 0.0f, fromZone.getOffset(), dst, fromZone.supportsDST());
-        Time result   = convertTime(fromTime, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
-
-        cout << "\n  " << fromZone.getCity() << " : "; fromTime.display();
-        cout << "  " << toZone.getCity()   << " : "; result.display();
-    }
-    else if (op == 2)
-    {
-        cout << "  From TZ (e.g. IST, JST, EST): ";
-        string fromTZ = readCityOrBack();
-        if (fromTZ == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
-
-        cout << "  To TZ   (e.g. JST, EST, GMT): ";
-        string toTZ = readCityOrBack();
-        if (toTZ == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
-
-        int fromIdx = -1, toIdx = -1;
-        for (int i = 0; i < locationManager.size(); i++)
+        if (op == 1)
         {
-            string tzName = locationManager.getZone(i + 1).getName();
-            if (fromIdx == -1 && normalize(tzName) == normalize(fromTZ)) fromIdx = i;
-            if (toIdx   == -1 && normalize(tzName) == normalize(toTZ))   toIdx   = i;
+            cout << "  From City: ";
+            string fromCity = readCityOrBack();
+            if (fromCity == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
+
+            cout << "  To City  : ";
+            string toCity = readCityOrBack();
+            if (toCity == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
+
+            int s = locationManager.findCity(fromCity);
+            if (s == -1) throw CityNotFoundException(fromCity);
+
+            int d = locationManager.findCity(toCity);
+            if (d == -1) throw CityNotFoundException(toCity);
+
+            TimeZone fromZone = locationManager.getZone(s + 1);
+            TimeZone toZone   = locationManager.getZone(d + 1);
+
+            Time utc      = getUTC();
+            Time fromTime = convertTime(utc, 0.0f, fromZone.getOffset(), dst, fromZone.supportsDST());
+            Time result   = convertTime(fromTime, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
+
+            cout << "\n  " << fromZone.getCity() << " : "; fromTime.display();
+            cout << "  " << toZone.getCity()   << " : "; result.display();
         }
-        if (fromIdx == -1 || toIdx == -1) { cout << "  Timezone not found.\n"; return; }
+        else if (op == 2)
+        {
+            cout << "  From TZ (e.g. IST, JST, EST): ";
+            string fromTZ = readCityOrBack();
+            if (fromTZ == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
 
-        TimeZone fromZone = locationManager.getZone(fromIdx + 1);
-        TimeZone toZone   = locationManager.getZone(toIdx   + 1);
+            cout << "  To TZ   (e.g. JST, EST, GMT): ";
+            string toTZ = readCityOrBack();
+            if (toTZ == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
 
-        Time utc      = getUTC();
-        Time fromTime = convertTime(utc, 0.0f, fromZone.getOffset(), dst, fromZone.supportsDST());
-        Time result   = convertTime(fromTime, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
+            int fromIdx = -1, toIdx = -1;
+            for (int i = 0; i < locationManager.size(); i++)
+            {
+                string tzName = locationManager.getZone(i + 1).getName();
+                if (fromIdx == -1 && normalize(tzName) == normalize(fromTZ)) fromIdx = i;
+                if (toIdx   == -1 && normalize(tzName) == normalize(toTZ))   toIdx   = i;
+            }
+            if (fromIdx == -1) throw TimezoneNotFoundException(fromTZ);
+            if (toIdx   == -1) throw TimezoneNotFoundException(toTZ);
 
-        cout << "\n  " << fromZone.getName() << " : "; fromTime.display();
-        cout << "  " << toZone.getName()   << " : "; result.display();
+            TimeZone fromZone = locationManager.getZone(fromIdx + 1);
+            TimeZone toZone   = locationManager.getZone(toIdx   + 1);
+
+            Time utc      = getUTC();
+            Time fromTime = convertTime(utc, 0.0f, fromZone.getOffset(), dst, fromZone.supportsDST());
+            Time result   = convertTime(fromTime, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
+
+            cout << "\n  " << fromZone.getName() << " : "; fromTime.display();
+            cout << "  " << toZone.getName()   << " : "; result.display();
+        }
+        else if (op == 3)
+        {
+            Time src;
+            src.setTime();
+            if (src.isCancelled()) { cout << "  Returning to menu.\n"; return; }
+
+            cout << "\n  Select Source Zone (enter number):\n";
+            locationManager.showZones();
+            cout << "  Choice: ";
+            int s = readIntOrBack();
+            if (s == INT_MIN) { cout << "  Returning to menu.\n"; return; }
+
+            cout << "\n  Select Destination Zone (enter number):\n";
+            locationManager.showZones();
+            cout << "  Choice: ";
+            int d = readIntOrBack();
+            if (d == INT_MIN) { cout << "  Returning to menu.\n"; return; }
+
+            TimeZone fromZone = locationManager.getZone(s);  // throws if invalid
+            TimeZone toZone   = locationManager.getZone(d);  // throws if invalid
+            Time result = convertTime(src, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
+
+            cout << "\n  " << fromZone.getCity() << " : "; src.display();
+            cout << "  " << toZone.getCity()   << " : "; result.display();
+        }
+        else
+            cout << "  Invalid option.\n";
     }
-    else if (op == 3)
+    catch (const TimeZoneException &e)
     {
-        Time src;
-        src.setTime();
-        if (src.isCancelled()) { cout << "  Returning to menu.\n"; return; }
-
-        cout << "\n  Select Source Zone (enter number):\n";
-        locationManager.showZones();
-        cout << "  Choice: ";
-        int s = readIntOrBack();
-        if (s == INT_MIN) { cout << "  Returning to menu.\n"; return; }
-
-        cout << "\n  Select Destination Zone (enter number):\n";
-        locationManager.showZones();
-        cout << "  Choice: ";
-        int d = readIntOrBack();
-        if (d == INT_MIN) { cout << "  Returning to menu.\n"; return; }
-
-        if (s < 1 || s > locationManager.size() ||
-            d < 1 || d > locationManager.size())
-        { cout << "  Invalid selection.\n"; return; }
-
-        TimeZone fromZone = locationManager.getZone(s);
-        TimeZone toZone   = locationManager.getZone(d);
-        Time result = convertTime(src, fromZone.getOffset(), toZone.getOffset(), dst, toZone.supportsDST());
-
-        cout << "\n  " << fromZone.getCity() << " : "; src.display();
-        cout << "  " << toZone.getCity()   << " : "; result.display();
+        cout << "\n  [Error] " << e.what() << "\n";
     }
-    else
-        cout << "  Invalid option.\n";
 }
-
-// ── set default menu ──────────────────────────────────────────────────────────
 
 void App::setDefaultMenu()
 {
@@ -181,40 +182,39 @@ void App::setDefaultMenu()
     int op = readIntOrBack();
     if (op == INT_MIN) { cout << "  Returning to menu.\n"; return; }
 
-    if (op == 1)
+    try
     {
-        cout << "  Enter city name: ";
-        string city = readCityOrBack();
-        if (city == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
-
-        if (locationManager.findCity(city) == -1)
-            cout << "  \"" << city << "\" not found in database.\n";
-        else
+        if (op == 1)
         {
+            cout << "  Enter city name: ";
+            string city = readCityOrBack();
+            if (city == BACK_CMD) { cout << "  Returning to menu.\n"; return; }
+
+            if (locationManager.findCity(city) == -1)
+                throw InvalidDefaultCityException(city);
+
             defaultCity = city;
             cout << "  Default city set to " << defaultCity << ".\n";
         }
-    }
-    else if (op == 2)
-    {
-        locationManager.showZones();
-        cout << "  Choice: ";
-        int idx = readIntOrBack();
-        if (idx == INT_MIN) { cout << "  Returning to menu.\n"; return; }
-
-        if (idx < 1 || idx > locationManager.size())
-            cout << "  Invalid selection.\n";
-        else
+        else if (op == 2)
         {
-            defaultCity = locationManager.getZone(idx).getCity();
+            locationManager.showZones();
+            cout << "  Choice: ";
+            int idx = readIntOrBack();
+            if (idx == INT_MIN) { cout << "  Returning to menu.\n"; return; }
+
+            TimeZone z  = locationManager.getZone(idx);  // throws if invalid
+            defaultCity = z.getCity();
             cout << "  Default city set to " << defaultCity << ".\n";
         }
+        else
+            cout << "  Invalid option.\n";
     }
-    else
-        cout << "  Invalid option.\n";
+    catch (const TimeZoneException &e)
+    {
+        cout << "\n  [Error] " << e.what() << "\n";
+    }
 }
-
-// ── main loop ─────────────────────────────────────────────────────────────────
 
 void App::run()
 {
@@ -248,61 +248,66 @@ void App::run()
 
         try { c = stoi(line); } catch (...) { cout << "  Enter a number 1-9.\n"; continue; }
 
-        if      (c == 1) showClock();
-        else if (c == 2) convertMenu();
-        else if (c == 3)
+        try
         {
-            printBackHint();
-            cout << "  Enter city name: ";
-            string city = readCityOrBack();
-            if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
-
-            int idx = locationManager.findCity(city);
-            if (idx == -1)
-                cout << "  \"" << city << "\" not found.\n";
-            else
+            if      (c == 1) showClock();
+            else if (c == 2) convertMenu();
+            else if (c == 3)
             {
-                TimeZone z = locationManager.getZone(idx + 1);
-                cout << "  Found: " << z.getCity() << " | " << z.getName()
-                     << " | UTC" << (z.getOffset() >= 0 ? "+" : "")
-                     << z.getOffset() << " | " << z.getCountry() << "\n";
+                printBackHint();
+                cout << "  Enter city name: ";
+                string city = readCityOrBack();
+                if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
+
+                int idx = locationManager.findCity(city);
+                if (idx == -1) throw CityNotFoundException(city);
+
+                TimeZone z     = locationManager.getZone(idx + 1);
+                Time     utc   = getUTC();
+                Time     local = convertTime(utc, 0.0f, z.getOffset(), dst, z.supportsDST());
+
+                cout << "  " << z.getCity() << " current time : "; local.display();
             }
-        }
-        else if (c == 4)
-        {
-            printBackHint();
-            cout << "  City name: ";
-            string city = readCityOrBack();
-            if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
-            favManager.add(city);
-        }
-        else if (c == 5) favManager.show();
-        else if (c == 6)
-        {
-            dst = !dst;
-            cout << "  DST " << (dst ? "Enabled" : "Disabled") << ".\n";
-        }
-        else if (c == 7)
-        {
-            printBackHint();
-            cout << "  Enter city name: ";
-            string city = readCityOrBack();
-            if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
+            else if (c == 4)
+            {
+                printBackHint();
+                cout << "  City name: ";
+                string city = readCityOrBack();
+                if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
+                favManager.add(city);
+            }
+            else if (c == 5) favManager.show();
+            else if (c == 6)
+            {
+                dst = !dst;
+                cout << "  DST " << (dst ? "Enabled" : "Disabled") << ".\n";
+            }
+            else if (c == 7)
+            {
+                printBackHint();
+                cout << "  Enter city name: ";
+                string city = readCityOrBack();
+                if (city == BACK_CMD) { cout << "  Returning to menu.\n"; continue; }
 
-            int idx = locationManager.findCity(city);
-            if (idx == -1) { cout << "  City not found.\n"; continue; }
+                int idx = locationManager.findCity(city);
+                if (idx == -1) throw CityNotFoundException(city);
 
-            TimeZone z     = locationManager.getZone(idx + 1);
-            Time     utc   = getUTC();
-            Time     local = convertTime(utc, 0.0f, z.getOffset(), dst, z.supportsDST());
+                TimeZone z     = locationManager.getZone(idx + 1);
+                Time     utc   = getUTC();
+                Time     local = convertTime(utc, 0.0f, z.getOffset(), dst, z.supportsDST());
 
-            cout << "  " << z.getCity() << " current time: "; local.display();
-            int h = local.getHour();
-            cout << (h >= 9 && h < 18 ? "  Within business hours (9am-6pm).\n"
-                                       : "  Outside business hours.\n");
+                cout << "  " << z.getCity() << " current time: "; local.display();
+                int h = local.getHour();
+                cout << (h >= 9 && h < 18 ? "  Within business hours (9am-6pm).\n"
+                                           : "  Outside business hours.\n");
+            }
+            else if (c == 8) setDefaultMenu();
+            else if (c == 9) { stopLiveClock(); cout << "  Goodbye!\n"; break; }
+            else cout << "  Invalid option. Enter 1-9.\n";
         }
-        else if (c == 8) setDefaultMenu();
-        else if (c == 9) { stopLiveClock(); cout << "  Goodbye!\n"; break; }
-        else cout << "  Invalid option. Enter 1-9.\n";
+        catch (const TimeZoneException &e)
+        {
+            cout << "\n  [Error] " << e.what() << "\n";
+        }
     }
 }
